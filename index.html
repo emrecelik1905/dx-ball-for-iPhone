@@ -171,59 +171,107 @@
   let paused=false;
   let audioCtx=null;
 
-  // Tilt control
+  // Tilt control — DeviceOrientation first, DeviceMotion gravity as fallback.
   let tiltEnabled=false;
-  let tiltGamma=0;
-  let tiltBeta=0;
+  let tiltAxis=0;
   let tiltNeutral=0;
   let tiltSamples=[];
   let tiltCalibrating=false;
+  let tiltSource='—';
+  let lastSensorAt=0;
   let lastTouchAt=0;
-  const TILT_DEADZONE=1.8;
-  const TILT_FULL=18;
+  const TILT_DEADZONE=1.5;
+  const TILT_FULL=15;
 
-  function orientationAxis(e) {
-    const angle = (screen.orientation && typeof screen.orientation.angle==='number') ? screen.orientation.angle : (window.orientation || 0);
-    // Portrait: gamma is left/right. Landscape: beta becomes the useful axis.
-    if (angle===90) return -(e.beta || 0);
-    if (angle===-90 || angle===270) return (e.beta || 0);
-    return (e.gamma || 0);
+  const tiltReadout=document.createElement('div');
+  tiltReadout.style.cssText='position:absolute;left:50%;bottom:58px;transform:translateX(-50%);z-index:6;padding:5px 9px;border-radius:999px;background:rgba(0,0,0,.48);border:1px solid rgba(255,255,255,.16);font-size:12px;font-weight:800;letter-spacing:.2px;pointer-events:none;display:none;white-space:nowrap';
+  document.querySelector('.stage').appendChild(tiltReadout);
+
+  function screenAngle(){
+    const a=(screen.orientation && typeof screen.orientation.angle==='number') ? screen.orientation.angle : (window.orientation || 0);
+    return ((Number(a)||0)%360+360)%360;
   }
 
-  function handleOrientation(e) {
-    const axis=orientationAxis(e);
-    if(!Number.isFinite(axis)) return;
-    tiltGamma=axis; tiltBeta=e.beta||0;
+  function orientationAxis(e) {
+    const a=screenAngle();
+    if(a===90) return -(Number(e.beta)||0);
+    if(a===270) return (Number(e.beta)||0);
+    return Number(e.gamma)||0;
+  }
+
+  function motionAxis(e) {
+    const g=e.accelerationIncludingGravity;
+    if(!g) return NaN;
+    const a=screenAngle();
+    let raw;
+    if(a===90) raw=-(Number(g.y)||0);
+    else if(a===270) raw=(Number(g.y)||0);
+    else raw=Number(g.x)||0;
+    // Convert gravity component to an approximate tilt angle in degrees.
+    return Math.asin(Math.max(-1,Math.min(1,raw/9.81)))*180/Math.PI;
+  }
+
+  function acceptTiltSample(axis,source){
+    if(!tiltEnabled || !Number.isFinite(axis)) return;
+    // Prefer DeviceOrientation when it is actively producing data.
+    if(source==='motion' && tiltSource==='orientation' && performance.now()-lastSensorAt<350) return;
+    tiltAxis=axis; tiltSource=source; lastSensorAt=performance.now();
+    tiltReadout.textContent=`Eğim ${(tiltAxis-tiltNeutral)>=0?'+':''}${(tiltAxis-tiltNeutral).toFixed(1)}° • ${source}`;
     if(tiltCalibrating) {
       tiltSamples.push(axis);
-      if(tiltSamples.length>=12) {
+      if(tiltSamples.length>=10) {
         tiltNeutral=tiltSamples.reduce((a,b)=>a+b,0)/tiltSamples.length;
         tiltSamples=[]; tiltCalibrating=false;
-        showToast('Eğim kontrolü hazır ✓');
         tiltBtn.textContent='🎮';
+        showToast('Eğim kontrolü hazır ✓');
       }
     }
   }
 
+  function handleOrientation(e){ acceptTiltSample(orientationAxis(e),'orientation'); }
+  function handleMotion(e){ acceptTiltSample(motionAxis(e),'motion'); }
+
   async function enableTilt() {
     try {
-      if (typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function') {
-        const state=await DeviceOrientationEvent.requestPermission();
-        if(state!=='granted') { showToast('Hareket sensörü izni verilmedi'); return; }
+      let ok=false;
+      if(typeof DeviceOrientationEvent!=='undefined') {
+        if(typeof DeviceOrientationEvent.requestPermission==='function') {
+          const state=await DeviceOrientationEvent.requestPermission();
+          ok = ok || state==='granted';
+        } else ok=true;
       }
-      window.removeEventListener('deviceorientation',handleOrientation);
+      if(typeof DeviceMotionEvent!=='undefined') {
+        if(typeof DeviceMotionEvent.requestPermission==='function') {
+          const state=await DeviceMotionEvent.requestPermission();
+          ok = ok || state==='granted';
+        } else ok=true;
+      }
+      if(!ok) { showToast('Hareket sensörü izni verilmedi'); return; }
+      window.removeEventListener('deviceorientation',handleOrientation,true);
+      window.removeEventListener('devicemotion',handleMotion,true);
       window.addEventListener('deviceorientation',handleOrientation,true);
-      tiltEnabled=true; tiltCalibrating=true; tiltSamples=[];
-      tiltBtn.textContent='⏳';
-      showToast('Telefonu düz tut • kalibre ediliyor');
+      window.addEventListener('devicemotion',handleMotion,true);
+      tiltEnabled=true; tiltCalibrating=true; tiltSamples=[]; tiltSource='—'; lastSensorAt=0;
+      tiltBtn.textContent='⏳'; tiltReadout.style.display='block';
+      tiltReadout.textContent='Sensör bekleniyor…';
+      showToast('Telefonu normal oynama açında sabit tut');
+      setTimeout(()=>{
+        if(tiltEnabled && lastSensorAt===0) {
+          tiltReadout.textContent='Sensör verisi yok';
+          showToast('Sensör verisi gelmedi • Safari iznini kontrol et');
+        }
+      },1800);
     } catch(err) {
+      tiltReadout.style.display='block'; tiltReadout.textContent='Sensör hatası';
       showToast('Eğim sensörü açılamadı');
     }
   }
 
   function disableTilt() {
-    tiltEnabled=false; tiltCalibrating=false; tiltSamples=[];
-    tiltBtn.textContent='📱';
+    tiltEnabled=false; tiltCalibrating=false; tiltSamples=[]; tiltSource='—';
+    window.removeEventListener('deviceorientation',handleOrientation,true);
+    window.removeEventListener('devicemotion',handleMotion,true);
+    tiltBtn.textContent='📱'; tiltReadout.style.display='none';
     showToast('Eğim kontrolü kapalı');
   }
   bestEl.textContent=bestScore;
@@ -538,12 +586,12 @@
 
   function update(dt) {
     // Tilt behaves like steering: more tilt = more speed. Touch temporarily overrides it.
-    if(tiltEnabled && !tiltCalibrating && performance.now()-lastTouchAt>650) {
-      let d=tiltGamma-tiltNeutral;
+    if(tiltEnabled && !tiltCalibrating && performance.now()-lastTouchAt>500) {
+      let d=tiltAxis-tiltNeutral;
       if(Math.abs(d)<TILT_DEADZONE) d=0;
       else d=Math.sign(d)*(Math.abs(d)-TILT_DEADZONE);
       const n=Math.max(-1,Math.min(1,d/(TILT_FULL-TILT_DEADZONE)));
-      const speed=W*1.35;
+      const speed=W*1.75;
       paddle.targetX += n*speed*dt;
     }
     paddle.x = Math.max(0,Math.min(W-paddle.w,paddle.targetX));
