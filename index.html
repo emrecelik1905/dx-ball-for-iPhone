@@ -170,6 +170,25 @@
   let soundOn=localStorage.getItem('dxball_sound')!=='0';
   let paused=false;
   let audioCtx=null;
+  // Keep the display awake while playing when the browser supports Screen Wake Lock.
+  let wakeLock=null;
+  async function acquireWakeLock(){
+    if(!('wakeLock' in navigator) || document.visibilityState!=='visible') return;
+    try {
+      if(!wakeLock) {
+        wakeLock=await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release',()=>{ wakeLock=null; });
+      }
+    } catch(_) {}
+  }
+  async function releaseWakeLock(){
+    try { if(wakeLock) await wakeLock.release(); } catch(_) {}
+    wakeLock=null;
+  }
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible' && running && !paused) acquireWakeLock();
+  });
+
 
   // Tilt control — DeviceOrientation first, DeviceMotion gravity as fallback.
   let tiltEnabled=false;
@@ -180,8 +199,10 @@
   let tiltSource='—';
   let lastSensorAt=0;
   let lastTouchAt=0;
-  const TILT_DEADZONE=1.5;
-  const TILT_FULL=15;
+  const TILT_DEADZONE=3.0;
+  const TILT_FULL=28;
+  const TILT_MAX_SPEED=0.72; // fraction of board width / second
+  let tiltSteer=0;
 
   const tiltReadout=document.createElement('div');
   tiltReadout.style.cssText='position:absolute;left:50%;bottom:58px;transform:translateX(-50%);z-index:6;padding:5px 9px;border-radius:999px;background:rgba(0,0,0,.48);border:1px solid rgba(255,255,255,.16);font-size:12px;font-weight:800;letter-spacing:.2px;pointer-events:none;display:none;white-space:nowrap';
@@ -221,7 +242,7 @@
       tiltSamples.push(axis);
       if(tiltSamples.length>=10) {
         tiltNeutral=tiltSamples.reduce((a,b)=>a+b,0)/tiltSamples.length;
-        tiltSamples=[]; tiltCalibrating=false;
+        tiltSamples=[]; tiltCalibrating=false; tiltSteer=0;
         tiltBtn.textContent='🎮';
         showToast('Eğim kontrolü hazır ✓');
       }
@@ -588,11 +609,18 @@
     // Tilt behaves like steering: more tilt = more speed. Touch temporarily overrides it.
     if(tiltEnabled && !tiltCalibrating && performance.now()-lastTouchAt>500) {
       let d=tiltAxis-tiltNeutral;
-      if(Math.abs(d)<TILT_DEADZONE) d=0;
-      else d=Math.sign(d)*(Math.abs(d)-TILT_DEADZONE);
-      const n=Math.max(-1,Math.min(1,d/(TILT_FULL-TILT_DEADZONE)));
-      const speed=W*1.75;
-      paddle.targetX += n*speed*dt;
+      let targetSteer=0;
+      if(Math.abs(d)>=TILT_DEADZONE) {
+        const raw=Math.max(-1,Math.min(1,
+          Math.sign(d)*(Math.abs(d)-TILT_DEADZONE)/(TILT_FULL-TILT_DEADZONE)
+        ));
+        // Cubic curve gives much finer control near the center.
+        targetSteer = Math.sign(raw)*Math.pow(Math.abs(raw),1.65);
+      }
+      // Smooth sensor jitter and sudden hand movement.
+      const blend=Math.min(1,dt*7);
+      tiltSteer += (targetSteer-tiltSteer)*blend;
+      paddle.targetX += tiltSteer*(W*TILT_MAX_SPEED)*dt;
     }
     paddle.x = Math.max(0,Math.min(W-paddle.w,paddle.targetX));
     paddle.targetX=paddle.x;
@@ -715,6 +743,7 @@
       if(navigator.vibrate) navigator.vibrate([35,30,55]);
       if(lives<=0) {
         running=false;
+        releaseWakeLock();
         endTitle.textContent='Oyun Bitti';
         updateBest();
         endText.textContent='Skorun: '+score+' • Rekor: '+bestScore+' • Seviye: '+level;
@@ -900,11 +929,13 @@
   });
 
   document.getElementById('startBtn').addEventListener('click',()=>{
-    started=true; running=true; paused=false; startOverlay.classList.add('hidden'); pauseOverlay.classList.add('hidden'); resetGame(); beep(520,.06,.03,'triangle');
+    started=true; running=true; paused=false;
+    acquireWakeLock(); startOverlay.classList.add('hidden'); pauseOverlay.classList.add('hidden'); resetGame(); beep(520,.06,.03,'triangle');
   });
 
   document.getElementById('restartBtn').addEventListener('click',()=>{
-    running=true; paused=false; endOverlay.classList.add('hidden'); pauseOverlay.classList.add('hidden'); resetGame(); beep(520,.06,.03,'triangle');
+    running=true; paused=false;
+    acquireWakeLock(); endOverlay.classList.add('hidden'); pauseOverlay.classList.add('hidden'); resetGame(); beep(520,.06,.03,'triangle');
   });
 
 
@@ -922,7 +953,7 @@
     if (document.hidden && running && !paused) setPaused(true);
     last=performance.now();
   });
-  if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js').catch(()=>{});
+  if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js?v=5').catch(()=>{});
   resize();
   makeBricks();
   resetBall();
