@@ -94,6 +94,7 @@
       <div class="hud-actions">
         <button class="iconBtn" id="pauseBtn" aria-label="Duraklat">⏸</button>
         <button class="iconBtn" id="soundBtn" aria-label="Ses">🔊</button>
+        <button class="iconBtn" id="tiltBtn" aria-label="Eğim kontrolü">📱</button>
       </div>
     </div>
     <div class="stats">
@@ -110,7 +111,7 @@
     <div class="overlay" id="startOverlay">
       <div class="card">
         <h1>DX Ball Mobile</h1>
-        <p>Parmağınla raketi sürükle, topu bırakmak için dokun. Çoklu top, delici, lazer, kalkan, bomba ve diğer bonusları yakala. Rekorun cihazında saklanır.</p>
+        <p>Telefonu sağa-sola eğerek raketi kontrol et. İstersen parmağınla da sürükleyebilirsin. Çoklu top, delici, lazer, kalkan, bomba ve diğer bonusları yakala. Rekorun cihazında saklanır.</p>
         <button id="startBtn">Oyuna Başla</button>
       </div>
     </div>
@@ -145,6 +146,7 @@
   const toast = document.getElementById('toast');
   const pauseBtn = document.getElementById('pauseBtn');
   const soundBtn = document.getElementById('soundBtn');
+  const tiltBtn = document.getElementById('tiltBtn');
 
   const startOverlay = document.getElementById('startOverlay');
   const endOverlay = document.getElementById('endOverlay');
@@ -168,6 +170,62 @@
   let soundOn=localStorage.getItem('dxball_sound')!=='0';
   let paused=false;
   let audioCtx=null;
+
+  // Tilt control
+  let tiltEnabled=false;
+  let tiltGamma=0;
+  let tiltBeta=0;
+  let tiltNeutral=0;
+  let tiltSamples=[];
+  let tiltCalibrating=false;
+  let lastTouchAt=0;
+  const TILT_DEADZONE=1.8;
+  const TILT_FULL=18;
+
+  function orientationAxis(e) {
+    const angle = (screen.orientation && typeof screen.orientation.angle==='number') ? screen.orientation.angle : (window.orientation || 0);
+    // Portrait: gamma is left/right. Landscape: beta becomes the useful axis.
+    if (angle===90) return -(e.beta || 0);
+    if (angle===-90 || angle===270) return (e.beta || 0);
+    return (e.gamma || 0);
+  }
+
+  function handleOrientation(e) {
+    const axis=orientationAxis(e);
+    if(!Number.isFinite(axis)) return;
+    tiltGamma=axis; tiltBeta=e.beta||0;
+    if(tiltCalibrating) {
+      tiltSamples.push(axis);
+      if(tiltSamples.length>=12) {
+        tiltNeutral=tiltSamples.reduce((a,b)=>a+b,0)/tiltSamples.length;
+        tiltSamples=[]; tiltCalibrating=false;
+        showToast('Eğim kontrolü hazır ✓');
+        tiltBtn.textContent='🎮';
+      }
+    }
+  }
+
+  async function enableTilt() {
+    try {
+      if (typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function') {
+        const state=await DeviceOrientationEvent.requestPermission();
+        if(state!=='granted') { showToast('Hareket sensörü izni verilmedi'); return; }
+      }
+      window.removeEventListener('deviceorientation',handleOrientation);
+      window.addEventListener('deviceorientation',handleOrientation,true);
+      tiltEnabled=true; tiltCalibrating=true; tiltSamples=[];
+      tiltBtn.textContent='⏳';
+      showToast('Telefonu düz tut • kalibre ediliyor');
+    } catch(err) {
+      showToast('Eğim sensörü açılamadı');
+    }
+  }
+
+  function disableTilt() {
+    tiltEnabled=false; tiltCalibrating=false; tiltSamples=[];
+    tiltBtn.textContent='📱';
+    showToast('Eğim kontrolü kapalı');
+  }
   bestEl.textContent=bestScore;
   soundBtn.textContent=soundOn?'🔊':'🔇';
   let last=0;
@@ -479,7 +537,17 @@
   }
 
   function update(dt) {
+    // Tilt behaves like steering: more tilt = more speed. Touch temporarily overrides it.
+    if(tiltEnabled && !tiltCalibrating && performance.now()-lastTouchAt>650) {
+      let d=tiltGamma-tiltNeutral;
+      if(Math.abs(d)<TILT_DEADZONE) d=0;
+      else d=Math.sign(d)*(Math.abs(d)-TILT_DEADZONE);
+      const n=Math.max(-1,Math.min(1,d/(TILT_FULL-TILT_DEADZONE)));
+      const speed=W*1.35;
+      paddle.targetX += n*speed*dt;
+    }
     paddle.x = Math.max(0,Math.min(W-paddle.w,paddle.targetX));
+    paddle.targetX=paddle.x;
 
     for (const k of Object.keys(powers)) {
       if (powers[k]>0) {
@@ -744,6 +812,7 @@
   }
 
   function moveTo(clientX) {
+    lastTouchAt=performance.now();
     const r=canvas.getBoundingClientRect();
     const newX=(clientX-r.left)-paddle.w/2;
     paddle.targetX=newX;
@@ -794,9 +863,10 @@
   pauseBtn.addEventListener('click',e=>{e.stopPropagation();setPaused(!paused);});
   document.getElementById('resumeBtn').addEventListener('click',()=>setPaused(false));
   soundBtn.addEventListener('click',e=>{e.stopPropagation();soundOn=!soundOn;localStorage.setItem('dxball_sound',soundOn?'1':'0');soundBtn.textContent=soundOn?'🔊':'🔇';if(soundOn)beep(620,.05,.03,'triangle');});
+  tiltBtn.addEventListener('click',async e=>{e.stopPropagation(); if(tiltEnabled) disableTilt(); else await enableTilt();});
 
   // Update intro hint
-  hint.textContent='Sürükle = raket • Dokun = bırak • ⏸ = duraklat';
+  hint.textContent='📱 Eğim = raket • Sürükle = yedek • Dokun = bırak';
 
   window.addEventListener('resize',resize);
   window.addEventListener('orientationchange',()=>setTimeout(resize,120));
