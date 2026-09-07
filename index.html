@@ -1,0 +1,816 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#0b1020" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="DX Ball" />
+<meta name="format-detection" content="telephone=no" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="apple-touch-icon" href="icon.svg" />
+<title>DX Ball Mobile</title>
+<style>
+  :root {
+    --bg1:#080b16;
+    --bg2:#111a35;
+    --panel:rgba(255,255,255,.08);
+    --text:#f7f9ff;
+    --muted:#aeb8d7;
+    --accent:#7df9ff;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; width:100%; height:100%; min-height:100%; overflow:hidden; overscroll-behavior:none; background:var(--bg1); color:var(--text);
+    font-family: ui-rounded, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif; }
+  body { touch-action:none; user-select:none; -webkit-user-select:none; position:fixed; inset:0; }
+  .wrap {
+    height:100dvh; min-height:-webkit-fill-available; width:100vw; display:flex; flex-direction:column;
+    background:
+      radial-gradient(circle at 50% -10%, rgba(69,104,255,.28), transparent 42%),
+      linear-gradient(180deg,var(--bg2),var(--bg1));
+  }
+  .hud {
+    min-height:58px; padding:calc(8px + env(safe-area-inset-top)) 14px 8px;
+    display:flex; align-items:flex-end; justify-content:space-between; gap:10px;
+    font-weight:700; letter-spacing:.2px;
+  }
+  .brand { font-size:18px; font-weight:900; }
+  .brand span { color:var(--accent); text-shadow:0 0 12px rgba(125,249,255,.6); }
+  .stats { display:flex; gap:10px; font-size:13px; }
+  .pill { padding:7px 10px; border-radius:999px; background:var(--panel); backdrop-filter:blur(12px); }
+  .stage { position:relative; flex:1; min-height:0; padding:0 8px 8px; }
+  canvas {
+    width:100%; height:100%; display:block; touch-action:none; border-radius:22px;
+    background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.015));
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.07), 0 18px 45px rgba(0,0,0,.28);
+  }
+  .overlay {
+    position:absolute; inset:0 8px 8px; display:flex; align-items:center; justify-content:center;
+    pointer-events:none;
+  }
+  .card {
+    pointer-events:auto; width:min(88%,390px); text-align:center; padding:22px;
+    border-radius:24px; background:rgba(7,10,23,.82); border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 24px 60px rgba(0,0,0,.45); backdrop-filter:blur(18px);
+  }
+  .card h1 { margin:0 0 7px; font-size:31px; }
+  .card p { margin:0 0 16px; color:var(--muted); line-height:1.4; font-size:14px; }
+  button {
+    border:0; border-radius:16px; padding:14px 20px; width:100%; font-size:16px; font-weight:900;
+    color:#071018; background:linear-gradient(135deg,#7df9ff,#91ffb5);
+    box-shadow:0 10px 28px rgba(125,249,255,.22);
+  }
+  .hint {
+    position:absolute; bottom:18px; left:50%; transform:translateX(-50%);
+    color:rgba(255,255,255,.45); font-size:12px; white-space:nowrap; pointer-events:none;
+  }
+  .hidden { display:none; }
+
+  .hud-left { display:flex; align-items:center; gap:9px; min-width:0; }
+  .hud-actions { display:flex; gap:7px; }
+  .iconBtn { width:38px; height:38px; padding:0; border-radius:12px; color:#fff; background:var(--panel); box-shadow:none; border:1px solid rgba(255,255,255,.08); font-size:17px; backdrop-filter:blur(12px); }
+  .best { color:#ffe66d; }
+  .toast { position:absolute; left:50%; top:62px; transform:translate(-50%,-8px); opacity:0; pointer-events:none; padding:8px 12px; border-radius:999px; background:rgba(7,10,23,.82); border:1px solid rgba(255,255,255,.12); font-size:12px; font-weight:800; transition:.2s ease; z-index:5; }
+  .toast.show { opacity:1; transform:translate(-50%,0); }
+  .pauseOverlay { position:absolute; inset:0 8px 8px; display:flex; align-items:center; justify-content:center; background:rgba(4,7,16,.48); backdrop-filter:blur(4px); border-radius:22px; z-index:4; }
+  .pauseOverlay.hidden { display:none; }
+  @media (max-width:430px) {
+    .hud { padding-left:9px; padding-right:9px; gap:6px; }
+    .brand { font-size:15px; }
+    .stats { gap:5px; font-size:11px; }
+    .pill { padding:6px 7px; }
+    .iconBtn { width:34px; height:34px; }
+    .stage { padding-left:5px; padding-right:5px; }
+    .overlay, .pauseOverlay { inset-left:5px; inset-right:5px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hud">
+    <div class="hud-left">
+      <div class="brand">DX <span>BALL</span></div>
+      <div class="hud-actions">
+        <button class="iconBtn" id="pauseBtn" aria-label="Duraklat">⏸</button>
+        <button class="iconBtn" id="soundBtn" aria-label="Ses">🔊</button>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="pill">Skor: <span id="score">0</span></div>
+      <div class="pill best">Rekor: <span id="best">0</span></div>
+      <div class="pill">Can: <span id="lives">3</span></div>
+      <div class="pill">Lv: <span id="level">1</span></div>
+    </div>
+  </div>
+
+  <div class="stage" id="stage">
+    <canvas id="game"></canvas>
+
+    <div class="overlay" id="startOverlay">
+      <div class="card">
+        <h1>DX Ball Mobile</h1>
+        <p>Parmağınla raketi sürükle, topu bırakmak için dokun. Çoklu top, delici, lazer, kalkan, bomba ve diğer bonusları yakala. Rekorun cihazında saklanır.</p>
+        <button id="startBtn">Oyuna Başla</button>
+      </div>
+    </div>
+
+    <div class="overlay hidden" id="endOverlay">
+      <div class="card">
+        <h1 id="endTitle">Oyun Bitti</h1>
+        <p id="endText">Skorun: 0</p>
+        <button id="restartBtn">Tekrar Oyna</button>
+      </div>
+    </div>
+
+    <div class="pauseOverlay hidden" id="pauseOverlay">
+      <div class="card"><h1>Duraklatıldı</h1><p>Devam etmek için aşağıdaki düğmeye dokun.</p><button id="resumeBtn">Devam Et</button></div>
+    </div>
+    <div class="toast" id="toast"></div>
+    <div class="hint" id="hint">Parmağını sürükle • Dokun = topu bırak</div>
+  </div>
+</div>
+
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  const scoreEl = document.getElementById('score');
+  const livesEl = document.getElementById('lives');
+  const levelEl = document.getElementById('level');
+  const bestEl = document.getElementById('best');
+  const pauseOverlay = document.getElementById('pauseOverlay');
+  const toast = document.getElementById('toast');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const soundBtn = document.getElementById('soundBtn');
+
+  const startOverlay = document.getElementById('startOverlay');
+  const endOverlay = document.getElementById('endOverlay');
+  const endTitle = document.getElementById('endTitle');
+  const endText = document.getElementById('endText');
+  const hint = document.getElementById('hint');
+
+  // Active power display
+  const powerHud = document.createElement('div');
+  powerHud.style.cssText = `
+    position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    display:flex; flex-wrap:wrap; justify-content:center; gap:6px;
+    pointer-events:none; width:min(92%,680px); z-index:3;
+  `;
+  document.querySelector('.stage').appendChild(powerHud);
+
+  let W=0,H=0,dpr=1;
+  let running=false, started=false;
+  let score=0,lives=3,level=1;
+  let bestScore=Number(localStorage.getItem('dxball_best')||0);
+  let soundOn=localStorage.getItem('dxball_sound')!=='0';
+  let paused=false;
+  let audioCtx=null;
+  bestEl.textContent=bestScore;
+  soundBtn.textContent=soundOn?'🔊':'🔇';
+  let last=0;
+  let particles=[];
+  let bricks=[];
+  let drops=[];
+  let balls=[];
+  let lasers=[];
+
+  const paddle = {
+    x:0, y:0, baseW:110, w:110, h:14, targetX:0,
+    laserCooldown:0
+  };
+
+  const powers = {
+    pierce: 0,
+    wide: 0,
+    fast: 0,
+    slow: 0,
+    laser: 0,
+    magnet: 0,
+    shield: 0
+  };
+
+  const POWER_DEFS = {
+    multi2: { icon:'×2', name:'2 Top', color:'#8a7dff', duration:0 },
+    multi3: { icon:'×3', name:'3 Top', color:'#ba7dff', duration:0 },
+    pierce: { icon:'◆', name:'Delici', color:'#ff6b6b', duration:8 },
+    fast:   { icon:'»', name:'Hızlı', color:'#ffb86b', duration:7 },
+    slow:   { icon:'«', name:'Yavaş', color:'#6de5ff', duration:8 },
+    wide:   { icon:'↔', name:'Geniş Raket', color:'#7dffb2', duration:10 },
+    life:   { icon:'+1', name:'Ekstra Can', color:'#91ffb5', duration:0 },
+    laser:  { icon:'↑', name:'Laser', color:'#ff7df2', duration:9 },
+    magnet: { icon:'●', name:'Mıknatıs', color:'#ffe66d', duration:8 },
+    shield: { icon:'▰', name:'Kalkan', color:'#66ffcc', duration:10 },
+    bomb:   { icon:'✦', name:'Bomba', color:'#ffcf5c', duration:0 }
+  };
+
+  const palette = ['#ff6b8a','#ffb86b','#ffe66d','#7dffb2','#6de5ff','#8a7dff'];
+
+  function beep(freq=440, dur=.05, gain=.035, type='sine') {
+    if(!soundOn) return;
+    try {
+      audioCtx ||= new (window.AudioContext||window.webkitAudioContext)();
+      if(audioCtx.state==='suspended') audioCtx.resume();
+      const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type=type; o.frequency.value=freq; g.gain.setValueAtTime(gain,audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(.0001,audioCtx.currentTime+dur);
+      o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime+dur);
+    } catch(_) {}
+  }
+  function showToast(text) {
+    toast.textContent=text; toast.classList.add('show');
+    clearTimeout(showToast.t); showToast.t=setTimeout(()=>toast.classList.remove('show'),1100);
+  }
+  function updateBest() {
+    if(score>bestScore){ bestScore=score; localStorage.setItem('dxball_best',String(bestScore)); bestEl.textContent=bestScore; }
+  }
+  function setPaused(v) {
+    if(!started || !running) return;
+    paused=v; pauseOverlay.classList.toggle('hidden',!v); pauseBtn.textContent=v?'▶':'⏸'; last=performance.now();
+  }
+
+  function resize() {
+    const r = canvas.getBoundingClientRect();
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(r.width*dpr);
+    canvas.height = Math.round(r.height*dpr);
+    W = r.width; H = r.height;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+
+    paddle.baseW = Math.max(82, Math.min(128, W*0.24));
+    paddle.h = Math.max(12, W*0.028);
+    paddle.y = H - Math.max(42, H*0.07);
+    applyPaddleWidth();
+
+    paddle.x = Math.max(0, Math.min(W-paddle.w, paddle.x || (W-paddle.w)/2));
+    paddle.targetX = paddle.x;
+
+    for (const ball of balls) {
+      ball.r = Math.max(6, Math.min(9, W*0.016));
+      if (ball.stuck) {
+        ball.x = paddle.x + paddle.w/2;
+        ball.y = paddle.y - ball.r - 4;
+      }
+    }
+    if (bricks.length) makeBricks();
+  }
+
+  function makeBricks() {
+    bricks = [];
+    const cols = W < 520 ? 7 : 10;
+    const rows = Math.min(5 + Math.floor((level-1)/2), 8);
+    const gap = Math.max(4, W*0.009);
+    const side = Math.max(12, W*0.028);
+    const top = Math.max(58, H*0.09);
+    const bw = (W - side*2 - gap*(cols-1))/cols;
+    const bh = Math.max(18, Math.min(28, H*0.035));
+
+    for (let row=0; row<rows; row++) {
+      for (let col=0; col<cols; col++) {
+        if (level > 1 && (row+col+level)%11===0) continue;
+        const strong = level >= 3 && (row+col*2+level)%8===0;
+        bricks.push({
+          x: side + col*(bw+gap),
+          y: top + row*(bh+gap),
+          w: bw, h: bh,
+          alive:true,
+          color:palette[row%palette.length],
+          hp: strong ? 2 : 1,
+          maxHp: strong ? 2 : 1
+        });
+      }
+    }
+  }
+
+  function newBall(x, y, vx, vy, stuck=false) {
+    return {
+      x, y,
+      r: Math.max(6, Math.min(9, W*0.016)),
+      vx, vy,
+      stuck,
+      stuckOffset: 0,
+      trail:[]
+    };
+  }
+
+  function baseSpeed() {
+    return 340 + (level-1)*24;
+  }
+
+  function currentSpeedMultiplier() {
+    if (powers.fast > 0) return 1.38;
+    if (powers.slow > 0) return 0.72;
+    return 1;
+  }
+
+  function setBallSpeed(ball, target) {
+    const cur = Math.hypot(ball.vx, ball.vy) || 1;
+    ball.vx = ball.vx/cur*target;
+    ball.vy = ball.vy/cur*target;
+  }
+
+  function normalizeAllBallSpeeds() {
+    const target = Math.min(760, baseSpeed()*currentSpeedMultiplier());
+    balls.forEach(b => {
+      if (!b.stuck) setBallSpeed(b,target);
+    });
+  }
+
+  function resetBall() {
+    const sp = baseSpeed()*currentSpeedMultiplier();
+    const vx = sp * (Math.random()>.5 ? .58 : -.58);
+    const vy = -Math.sqrt(Math.max(0, sp*sp-vx*vx));
+    balls = [newBall(paddle.x+paddle.w/2, paddle.y-10, vx, vy, true)];
+  }
+
+  function clearTimedPowers() {
+    for (const k of Object.keys(powers)) powers[k]=0;
+    applyPaddleWidth();
+    renderPowerHud();
+  }
+
+  function resetGame() {
+    score=0; lives=3; level=1;
+    particles=[]; drops=[]; lasers=[];
+    clearTimedPowers();
+    scoreEl.textContent=score; livesEl.textContent=lives; levelEl.textContent=level;
+    paddle.x=(W-paddle.w)/2; paddle.targetX=paddle.x;
+    makeBricks(); resetBall();
+  }
+
+  function roundedRect(x,y,w,h,r) {
+    ctx.beginPath();
+    ctx.roundRect(x,y,w,h,r);
+  }
+
+  function burst(x,y,color,n=8) {
+    for(let i=0;i<n;i++) {
+      const a=Math.random()*Math.PI*2, s=45+Math.random()*110;
+      particles.push({
+        x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,
+        life:.55+Math.random()*.25,color,size:2+Math.random()*3
+      });
+    }
+  }
+
+  function choosePowerType() {
+    const pool = [
+      'multi2','multi2','multi3',
+      'pierce','pierce',
+      'slow','slow',
+      'fast',
+      'wide','wide',
+      'laser','laser',
+      'magnet','shield',
+      'bomb',
+      'life'
+    ];
+    return pool[Math.floor(Math.random()*pool.length)];
+  }
+
+  function maybeDropPower(brick) {
+    // ~23% chance
+    if (Math.random() > 0.23) return;
+    const type = choosePowerType();
+    drops.push({
+      x: brick.x+brick.w/2,
+      y: brick.y+brick.h/2,
+      vy: 115,
+      r: 13,
+      type,
+      spin:0
+    });
+  }
+
+  function applyPaddleWidth() {
+    paddle.w = paddle.baseW * (powers.wide>0 ? 1.55 : 1);
+    paddle.x = Math.max(0,Math.min(W-paddle.w,paddle.x));
+  }
+
+  function spawnExtraBalls(count) {
+    if (!balls.length) return;
+    const source = balls[0];
+    const sp = Math.max(baseSpeed()*currentSpeedMultiplier(), Math.hypot(source.vx,source.vy));
+    const angles = count===2 ? [-0.38,0.38] : [-0.55,0,0.55];
+
+    const created = [];
+    for (const a of angles) {
+      const baseAngle = Math.atan2(source.vy,source.vx);
+      const ang = baseAngle + a;
+      created.push(newBall(source.x,source.y,Math.cos(ang)*sp,Math.sin(ang)*sp,false));
+    }
+
+    balls = balls.filter(b=>b!==source).concat(created);
+    burst(source.x,source.y,'#b38cff',18);
+  }
+
+  function activatePower(type) {
+    const def = POWER_DEFS[type];
+
+    if (type==='multi2') spawnExtraBalls(2);
+    else if (type==='multi3') spawnExtraBalls(3);
+    else if (type==='bomb') {
+      const alive=bricks.filter(b=>b.alive);
+      alive.sort(()=>Math.random()-.5).slice(0,Math.min(8,alive.length)).forEach(b=>damageBrick(b,null,true));
+      score += Math.min(8,alive.length)*5*level; scoreEl.textContent=score; updateBest();
+      burst(paddle.x+paddle.w/2,paddle.y,'#ffcf5c',30);
+    }
+    else if (type==='life') {
+      lives = Math.min(9,lives+1);
+      livesEl.textContent=lives;
+    } else {
+      powers[type] = def.duration;
+      if (type==='fast' && powers.slow>0) powers.slow=0;
+      if (type==='slow' && powers.fast>0) powers.fast=0;
+      if (type==='wide') applyPaddleWidth();
+      normalizeAllBallSpeeds();
+    }
+
+    if (navigator.vibrate) navigator.vibrate([15,20,15]);
+    beep(type==='life'?740:560,.07,.045,'triangle');
+    showToast(def.name);
+    renderPowerHud();
+  }
+
+  function renderPowerHud() {
+    powerHud.innerHTML='';
+    for (const [key,time] of Object.entries(powers)) {
+      if (time<=0) continue;
+      const d=POWER_DEFS[key];
+      const chip=document.createElement('div');
+      chip.style.cssText=`
+        padding:6px 9px;border-radius:999px;
+        background:rgba(7,10,23,.72);border:1px solid ${d.color}88;
+        box-shadow:0 0 18px ${d.color}22;color:#fff;
+        font-size:11px;font-weight:800;backdrop-filter:blur(10px);
+      `;
+      chip.textContent=`${d.icon} ${d.name} ${time.toFixed(1)}s`;
+      powerHud.appendChild(chip);
+    }
+  }
+
+  function damageBrick(b, ball, forceKill=false) {
+    if(!b.alive) return;
+
+    if (forceKill) b.hp=0;
+    else b.hp--;
+
+    burst(ball?.x ?? b.x+b.w/2, ball?.y ?? b.y+b.h/2,b.color,8);
+
+    if(b.hp<=0) {
+      b.alive=false;
+      score += 10*level;
+      scoreEl.textContent=score; updateBest();
+      beep(310+Math.min(500,level*24),.035,.022,'square');
+      maybeDropPower(b);
+    }
+  }
+
+  function shootLasers(dt) {
+    if (powers.laser<=0) return;
+    paddle.laserCooldown -= dt;
+    if (paddle.laserCooldown<=0) {
+      paddle.laserCooldown=.32;
+      lasers.push({x:paddle.x+5,y:paddle.y,vy:-520,w:3,h:14});
+      lasers.push({x:paddle.x+paddle.w-8,y:paddle.y,vy:-520,w:3,h:14});
+    }
+  }
+
+  function update(dt) {
+    paddle.x = Math.max(0,Math.min(W-paddle.w,paddle.targetX));
+
+    for (const k of Object.keys(powers)) {
+      if (powers[k]>0) {
+        powers[k] = Math.max(0,powers[k]-dt);
+        if (powers[k]===0) {
+          if (k==='wide') applyPaddleWidth();
+          if (k==='fast' || k==='slow') normalizeAllBallSpeeds();
+        }
+      }
+    }
+    renderPowerHud();
+
+    shootLasers(dt);
+
+    // balls
+    for (let bi=balls.length-1; bi>=0; bi--) {
+      const ball = balls[bi];
+
+      if (ball.stuck) {
+        ball.x = paddle.x+paddle.w/2+ball.stuckOffset;
+        ball.y = paddle.y-ball.r-4;
+      } else {
+        ball.trail.push({x:ball.x,y:ball.y,life:.22});
+        if(ball.trail.length>12) ball.trail.shift();
+
+        ball.x += ball.vx*dt;
+        ball.y += ball.vy*dt;
+
+        if(ball.x-ball.r<0){ball.x=ball.r;ball.vx=Math.abs(ball.vx);}
+        if(ball.x+ball.r>W){ball.x=W-ball.r;ball.vx=-Math.abs(ball.vx);}
+        if(ball.y-ball.r<0){ball.y=ball.r;ball.vy=Math.abs(ball.vy);}
+
+        if(ball.vy>0 &&
+           ball.y+ball.r>=paddle.y && ball.y-ball.r<=paddle.y+paddle.h &&
+           ball.x>=paddle.x-ball.r && ball.x<=paddle.x+paddle.w+ball.r) {
+          ball.y=paddle.y-ball.r-1;
+          const hit=((ball.x-(paddle.x+paddle.w/2))/(paddle.w/2));
+          const angle=hit*1.12;
+          const sp=Math.min(760, baseSpeed()*currentSpeedMultiplier()*(1+Math.min(level*.02,.2)));
+          ball.vx=sp*Math.sin(angle);
+          ball.vy=-Math.abs(sp*Math.cos(angle));
+
+          if (powers.magnet>0) {
+            ball.stuck=true;
+            ball.stuckOffset=Math.max(-paddle.w*.35,Math.min(paddle.w*.35,ball.x-(paddle.x+paddle.w/2)));
+          }
+          if(navigator.vibrate) navigator.vibrate(8);
+          beep(220,.025,.018,'sine');
+        }
+
+        for (const b of bricks) {
+          if(!b.alive) continue;
+          if(ball.x+ball.r>b.x && ball.x-ball.r<b.x+b.w &&
+             ball.y+ball.r>b.y && ball.y-ball.r<b.y+b.h) {
+
+            if (powers.pierce>0) {
+              damageBrick(b,ball,true);
+              // no bounce: drill straight through
+            } else {
+              const prevX=ball.x-ball.vx*dt, prevY=ball.y-ball.vy*dt;
+              const fromSide = prevX+ball.r<=b.x || prevX-ball.r>=b.x+b.w;
+              if(fromSide) ball.vx*=-1; else ball.vy*=-1;
+              damageBrick(b,ball,false);
+              break;
+            }
+          }
+        }
+
+        if(ball.y-ball.r>H) {
+          if(powers.shield>0) {
+            ball.y=H-ball.r-2; ball.vy=-Math.abs(ball.vy); powers.shield=0; renderPowerHud();
+            burst(ball.x,H-6,'#66ffcc',18); beep(180,.12,.05,'sawtooth'); showToast('Kalkan kurtardı!');
+          } else balls.splice(bi,1);
+        }
+      }
+
+      for (const t of ball.trail) t.life-=dt;
+      ball.trail=ball.trail.filter(t=>t.life>0);
+    }
+
+    // laser projectiles
+    for (let i=lasers.length-1;i>=0;i--) {
+      const l=lasers[i];
+      l.y += l.vy*dt;
+      let hit=false;
+      for (const b of bricks) {
+        if(!b.alive) continue;
+        if(l.x+l.w>b.x && l.x<b.x+b.w && l.y<b.y+b.h && l.y+l.h>b.y) {
+          damageBrick(b,null,false);
+          hit=true;
+          break;
+        }
+      }
+      if(hit || l.y+l.h<0) lasers.splice(i,1);
+    }
+
+    // drops
+    for(let i=drops.length-1;i>=0;i--){
+      const d=drops[i];
+      d.y += d.vy*dt;
+      d.spin += dt*3;
+
+      if(d.y+d.r>=paddle.y && d.y-d.r<=paddle.y+paddle.h &&
+         d.x>=paddle.x && d.x<=paddle.x+paddle.w) {
+        activatePower(d.type);
+        burst(d.x,d.y,POWER_DEFS[d.type].color,16);
+        drops.splice(i,1);
+        continue;
+      }
+      if(d.y-d.r>H) drops.splice(i,1);
+    }
+
+    // if all balls are gone, lose one life
+    if (balls.length===0 && running) {
+      lives--;
+      livesEl.textContent=lives;
+      if(navigator.vibrate) navigator.vibrate([35,30,55]);
+      if(lives<=0) {
+        running=false;
+        endTitle.textContent='Oyun Bitti';
+        updateBest();
+        endText.textContent='Skorun: '+score+' • Rekor: '+bestScore+' • Seviye: '+level;
+        beep(120,.35,.05,'sawtooth');
+        endOverlay.classList.remove('hidden');
+      } else {
+        resetBall();
+      }
+    }
+
+    if(bricks.length && bricks.every(b=>!b.alive)) {
+      level++;
+      levelEl.textContent=level;
+      score += 100*level;
+      scoreEl.textContent=score; updateBest();
+      beep(760,.12,.04,'triangle'); showToast('Seviye '+level);
+      drops=[];
+      lasers=[];
+      clearTimedPowers();
+      makeBricks();
+      resetBall();
+    }
+
+    for(let i=particles.length-1;i>=0;i--){
+      const p=particles[i];
+      p.life-=dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=100*dt;
+      if(p.life<=0) particles.splice(i,1);
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0,0,W,H);
+
+    ctx.save();
+    ctx.globalAlpha=.20;
+    for(let i=0;i<28;i++){
+      const x=(i*73.23)%W, y=(i*131.77)%H;
+      ctx.fillStyle='#fff';
+      ctx.fillRect(x,y,1.2,1.2);
+    }
+    ctx.restore();
+
+    // bricks
+    for(const b of bricks){
+      if(!b.alive) continue;
+      const grad=ctx.createLinearGradient(b.x,b.y,b.x,b.y+b.h);
+      grad.addColorStop(0,b.color);
+      grad.addColorStop(1,'rgba(255,255,255,.20)');
+      ctx.fillStyle=grad;
+      ctx.shadowColor=b.color; ctx.shadowBlur=10;
+      roundedRect(b.x,b.y,b.w,b.h,6); ctx.fill();
+      ctx.shadowBlur=0;
+      ctx.fillStyle='rgba(255,255,255,.22)';
+      roundedRect(b.x+2,b.y+2,b.w-4,Math.max(3,b.h*.25),4); ctx.fill();
+      if(b.hp>1){
+        ctx.strokeStyle='rgba(255,255,255,.8)'; ctx.lineWidth=1.2;
+        roundedRect(b.x+3,b.y+3,b.w-6,b.h-6,5); ctx.stroke();
+      }
+    }
+
+    // falling power-ups
+    for(const d of drops){
+      const def=POWER_DEFS[d.type];
+      ctx.save();
+      ctx.translate(d.x,d.y);
+      ctx.rotate(Math.sin(d.spin)*.12);
+      ctx.fillStyle=def.color;
+      ctx.shadowColor=def.color; ctx.shadowBlur=18;
+      roundedRect(-17,-13,34,26,8); ctx.fill();
+      ctx.shadowBlur=0;
+      ctx.strokeStyle='rgba(255,255,255,.75)';
+      ctx.lineWidth=1;
+      roundedRect(-17,-13,34,26,8); ctx.stroke();
+      ctx.fillStyle='#071018';
+      ctx.font='900 12px system-ui';
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
+      ctx.fillText(def.icon,0,0);
+      ctx.restore();
+    }
+
+    // lasers
+    ctx.fillStyle='#ff7df2';
+    ctx.shadowColor='#ff7df2'; ctx.shadowBlur=12;
+    for(const l of lasers) ctx.fillRect(l.x,l.y,l.w,l.h);
+    ctx.shadowBlur=0;
+
+    // bottom shield
+    if(powers.shield>0){
+      ctx.strokeStyle='rgba(102,255,204,.85)'; ctx.lineWidth=4; ctx.shadowColor='#66ffcc'; ctx.shadowBlur=14;
+      ctx.beginPath(); ctx.moveTo(12,H-8); ctx.lineTo(W-12,H-8); ctx.stroke(); ctx.shadowBlur=0;
+    }
+
+    // paddle
+    const pg=ctx.createLinearGradient(paddle.x,paddle.y,paddle.x+paddle.w,paddle.y);
+    pg.addColorStop(0,'#6de5ff'); pg.addColorStop(.5,'#ffffff'); pg.addColorStop(1,'#8a7dff');
+    ctx.fillStyle=pg; ctx.shadowColor='#7df9ff'; ctx.shadowBlur=18;
+    roundedRect(paddle.x,paddle.y,paddle.w,paddle.h,paddle.h/2); ctx.fill();
+    ctx.shadowBlur=0;
+
+    // laser emitters
+    if (powers.laser>0) {
+      ctx.fillStyle='#ff7df2';
+      ctx.fillRect(paddle.x+2,paddle.y-5,7,7);
+      ctx.fillRect(paddle.x+paddle.w-9,paddle.y-5,7,7);
+    }
+
+    // balls
+    for(const ball of balls){
+      if (powers.pierce>0) {
+        for(const t of ball.trail){
+          ctx.globalAlpha=Math.max(0,t.life/.22)*.38;
+          ctx.fillStyle='#ff6b6b';
+          ctx.beginPath();ctx.arc(t.x,t.y,ball.r*.65,0,Math.PI*2);ctx.fill();
+        }
+        ctx.globalAlpha=1;
+      }
+
+      const ballColor = powers.pierce>0 ? '#ff6b6b' : '#6de5ff';
+      const bg=ctx.createRadialGradient(ball.x-2,ball.y-2,1,ball.x,ball.y,ball.r);
+      bg.addColorStop(0,'#fff');
+      bg.addColorStop(.35,powers.pierce>0?'#ffd7d7':'#d9ffff');
+      bg.addColorStop(1,ballColor);
+      ctx.fillStyle=bg; ctx.shadowColor=ballColor; ctx.shadowBlur=16;
+      ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fill();
+      ctx.shadowBlur=0;
+    }
+
+    // particles
+    for(const p of particles){
+      ctx.globalAlpha=Math.max(0,p.life/.8);
+      ctx.fillStyle=p.color;
+      ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+  }
+
+  function loop(t) {
+    const dt=Math.min(.025,(t-last)/1000||0); last=t;
+    if(running && !paused) update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function moveTo(clientX) {
+    const r=canvas.getBoundingClientRect();
+    const newX=(clientX-r.left)-paddle.w/2;
+    paddle.targetX=newX;
+    paddle.x=Math.max(0,Math.min(W-paddle.w,newX));
+  }
+
+  canvas.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+    moveTo(e.clientX);
+    if(running && !paused) {
+      for (const ball of balls) {
+        if(ball.stuck) {
+          ball.stuck=false;
+          ball.stuckOffset=0;
+        }
+      }
+    }
+  }, {passive:false});
+
+  canvas.addEventListener('pointermove', e => {
+    if (e.pointerType === 'touch') e.preventDefault();
+    moveTo(e.clientX);
+  }, {passive:false});
+
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('gesturestart', e => e.preventDefault(), {passive:false});
+  document.addEventListener('touchmove', e => {
+    if (e.target === canvas) e.preventDefault();
+  }, {passive:false});
+
+  document.addEventListener('keydown', e=>{
+    if(e.key==='ArrowLeft') paddle.targetX-=45;
+    if(e.key==='ArrowRight') paddle.targetX+=45;
+    if(e.key===' ' && running && !paused) balls.forEach(b=>b.stuck=false);
+    if(e.key==='Escape' || e.key.toLowerCase()==='p') setPaused(!paused);
+  });
+
+  document.getElementById('startBtn').addEventListener('click',()=>{
+    started=true; running=true; paused=false; startOverlay.classList.add('hidden'); pauseOverlay.classList.add('hidden'); resetGame(); beep(520,.06,.03,'triangle');
+  });
+
+  document.getElementById('restartBtn').addEventListener('click',()=>{
+    running=true; paused=false; endOverlay.classList.add('hidden'); pauseOverlay.classList.add('hidden'); resetGame(); beep(520,.06,.03,'triangle');
+  });
+
+
+  pauseBtn.addEventListener('click',e=>{e.stopPropagation();setPaused(!paused);});
+  document.getElementById('resumeBtn').addEventListener('click',()=>setPaused(false));
+  soundBtn.addEventListener('click',e=>{e.stopPropagation();soundOn=!soundOn;localStorage.setItem('dxball_sound',soundOn?'1':'0');soundBtn.textContent=soundOn?'🔊':'🔇';if(soundOn)beep(620,.05,.03,'triangle');});
+
+  // Update intro hint
+  hint.textContent='Sürükle = raket • Dokun = bırak • ⏸ = duraklat';
+
+  window.addEventListener('resize',resize);
+  window.addEventListener('orientationchange',()=>setTimeout(resize,120));
+  document.addEventListener('visibilitychange',()=>{
+    if (document.hidden && running && !paused) setPaused(true);
+    last=performance.now();
+  });
+  if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js').catch(()=>{});
+  resize();
+  makeBricks();
+  resetBall();
+  requestAnimationFrame(loop);
+})();
+</script>
+
+</body>
+</html>

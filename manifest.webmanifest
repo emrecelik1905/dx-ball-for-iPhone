@@ -1,0 +1,12 @@
+{
+  "name": "DX Ball Mobile",
+  "short_name": "DX Ball",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#080b16",
+  "theme_color": "#0b1020",
+  "description": "Mobil DX Ball / brick breaker oyunu",
+  "icons": [{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}
